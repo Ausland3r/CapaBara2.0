@@ -1,0 +1,114 @@
+# recommendations.py
+from typing import List
+
+__all__ = ['generate_recommendations']
+
+def generate_recommendations(commit: dict,
+                             risk_proba: float,
+                             repo_stats: dict,
+                             feature_importances: dict) -> List[str]:
+
+    recommendations: List[str] = []
+
+    # 1) Общие предупреждения по риску
+    if risk_proba > 0.8:
+        recommendations.append(
+            "⚠️ Очень высокий риск: обязательно провести углублённое код-ревью и расширенное тестирование."
+        )
+    elif risk_proba > 0.5:
+        recommendations.append(
+            "🔍 Повышенный риск: обратите внимание на качество изменений и добавьте тесты."
+        )
+
+    # 2) Длина сообщения
+    msg_len = commit.get('message_length', 0)
+    if msg_len < 20:
+        recommendations.append(
+            "✏️ Сообщение слишком короткое: дайте подробное описание изменений."
+        )
+    elif msg_len > 200:
+        recommendations.append(
+            "📝 Очень длинное сообщение: разделите описание на ключевые пункты или используйте более лаконичные формулировки."
+        )
+
+    # 3) Багфикс-флаг
+    if commit.get('has_bug_keyword', 0):
+        recommendations.append(
+            "🐞 Выявлен багфикс: убедитесь в наличии регрессионных тестов и обновлении документации."
+        )
+
+    # 4) Объём изменений
+    lines_added = commit.get('lines_added', 0)
+    lines_deleted = commit.get('lines_deleted', 0)
+    total = lines_added + lines_deleted
+    stats_total = repo_stats.get('total_changes', {})
+    mean_total = stats_total.get('mean')
+    std_total = stats_total.get('std')
+    if mean_total and std_total and total > mean_total + 2 * std_total:
+        recommendations.append(
+            f"📊 Объём изменений ({total}) значительно превышает среднее ({mean_total:.1f}). "
+            "Разбейте коммит на более мелкие логические части."
+        )
+
+    # 5) Изменённые файлы
+    files_changed = commit.get('files_changed', 0)
+    stats_files = repo_stats.get('files_changed', {})
+    q95_files = stats_files.get('quantile_95')
+    if q95_files and files_changed > q95_files:
+        recommendations.append(
+            f"📂 Затронуто слишком много файлов ({files_changed} > 95% квантиль). Проверьте целостность изменений."
+        )
+
+    # 6) Сложность изменений
+    complexity = commit.get('complexity_score', 0)
+    stats_complex = repo_stats.get('complexity_score', {})
+    q90_complex = stats_complex.get('quantile_90')
+    if q90_complex and complexity > q90_complex:
+        recommendations.append(
+            f"🧩 Высокая сложность ({complexity} > 90% квантиль). "
+            "Рассмотрите рефакторинг и дополнительное покрытие тестами."
+        )
+
+    # 7) История изменений файлов
+    avg_hist = commit.get('avg_file_history', 0)
+    stats_hist = repo_stats.get('avg_file_history', {})
+    mean_hist = stats_hist.get('mean')
+    std_hist = stats_hist.get('std')
+    if mean_hist and std_hist and avg_hist > mean_hist + 2 * std_hist:
+        recommendations.append(
+            f"📈 Файлы часто меняются ({avg_hist:.1f} > {mean_hist:.1f} + 2σ). "
+            "Возможно, стоит разделить функциональность."
+        )
+
+    # 8) Интервал между коммитами
+    interval = commit.get('minutes_since_previous_commit')
+    stats_interval = repo_stats.get('commit_interval', {})
+    median_int = stats_interval.get('median')
+    if interval is not None and median_int:
+        if interval < 5:
+            recommendations.append(
+                "⏱ Очень быстрый коммит (<5 минут): убедитесь, что изменения завершены и протестированы."
+            )
+        if interval > 2 * median_int:
+            recommendations.append(
+                f"⏳ Промежуток {interval:.0f} мин более чем в 2 раза дольше медианы "
+                f"({median_int:.0f} мин): проверьте актуальность ветки перед слиянием."
+            )
+
+    # 9) Индивидуальная статистика автора
+    author = commit.get('author_name', 'Unknown')
+    author_stats = repo_stats.get('author_stats', {}).get(author, {})
+    median_lines_author = author_stats.get('median_lines_added')
+    if median_lines_author and lines_added > 2 * median_lines_author:
+        recommendations.append(
+            f"👤 Автор {author} внёс {lines_added} строк, что более чем в 2 раза превышает "
+            f"его медианные {median_lines_author} строк: дополнительная проверка кода."
+        )
+
+    # 10) Фоллбек
+    if not recommendations:
+        recommendations.append(
+            "✅ Явных аномалий не обнаружено. Рекомендуется стандартное код-ревью и покрытие тестами."
+        )
+
+    return recommendations
