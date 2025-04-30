@@ -10,7 +10,6 @@ def generate_recommendations(commit: dict,
 
     recommendations: List[str] = []
 
-    # 1) Общие предупреждения по риску
     if risk_proba > 0.8:
         recommendations.append(
             "⚠️ Очень высокий риск: обязательно провести углублённое код-ревью и расширенное тестирование."
@@ -20,7 +19,6 @@ def generate_recommendations(commit: dict,
             "🔍 Повышенный риск: обратите внимание на качество изменений и добавьте тесты."
         )
 
-    # 2) Длина сообщения
     msg_len = commit.get('message_length', 0)
     if msg_len < 20:
         recommendations.append(
@@ -31,13 +29,11 @@ def generate_recommendations(commit: dict,
             "📝 Очень длинное сообщение: разделите описание на ключевые пункты или используйте более лаконичные формулировки."
         )
 
-    # 3) Багфикс-флаг
     if commit.get('has_bug_keyword', 0):
         recommendations.append(
             "🐞 Выявлен багфикс: убедитесь в наличии регрессионных тестов и обновлении документации."
         )
 
-    # 4) Объём изменений
     lines_added = commit.get('lines_added', 0)
     lines_deleted = commit.get('lines_deleted', 0)
     total = lines_added + lines_deleted
@@ -50,7 +46,6 @@ def generate_recommendations(commit: dict,
             "Разбейте коммит на более мелкие логические части."
         )
 
-    # 5) Изменённые файлы
     files_changed = commit.get('files_changed', 0)
     stats_files = repo_stats.get('files_changed', {})
     q95_files = stats_files.get('quantile_95')
@@ -59,7 +54,6 @@ def generate_recommendations(commit: dict,
             f"📂 Затронуто слишком много файлов ({files_changed} > 95% квантиль). Проверьте целостность изменений."
         )
 
-    # 6) Сложность изменений
     complexity = commit.get('complexity_score', 0)
     stats_complex = repo_stats.get('complexity_score', {})
     q90_complex = stats_complex.get('quantile_90')
@@ -69,7 +63,6 @@ def generate_recommendations(commit: dict,
             "Рассмотрите рефакторинг и дополнительное покрытие тестами."
         )
 
-    # 7) История изменений файлов
     avg_hist = commit.get('avg_file_history', 0)
     stats_hist = repo_stats.get('avg_file_history', {})
     mean_hist = stats_hist.get('mean')
@@ -80,7 +73,6 @@ def generate_recommendations(commit: dict,
             "Возможно, стоит разделить функциональность."
         )
 
-    # 8) Интервал между коммитами
     interval = commit.get('minutes_since_previous_commit')
     stats_interval = repo_stats.get('commit_interval', {})
     median_int = stats_interval.get('median')
@@ -95,7 +87,6 @@ def generate_recommendations(commit: dict,
                 f"({median_int:.0f} мин): проверьте актуальность ветки перед слиянием."
             )
 
-    # 9) Индивидуальная статистика автора
     author = commit.get('author_name', 'Unknown')
     author_stats = repo_stats.get('author_stats', {}).get(author, {})
     median_lines_author = author_stats.get('median_lines_added')
@@ -105,7 +96,6 @@ def generate_recommendations(commit: dict,
             f"его медианные {median_lines_author} строк: дополнительная проверка кода."
         )
 
-    # 10) Фоллбек
     if not recommendations:
         recommendations.append(
             "✅ Явных аномалий не обнаружено. Рекомендуется стандартное код-ревью и покрытие тестами."
