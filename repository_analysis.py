@@ -40,21 +40,21 @@ class GitHubRepoAnalyzer:
         self.local_path = os.path.join(clone_dir, repo_name)
         if not os.path.isdir(self.local_path):
             clone_url = f"https://github.com/{repo_owner}/{repo_name}.git"
-            print(f"[INIT] 🔄 Cloning repository {clone_url} into {self.local_path}…")
+            print(f"[INIT] Cloning repository {clone_url} into {self.local_path}…")
             Repo.clone_from(clone_url, self.local_path)
-            print(f"[INIT] ✅ Clone complete.")
+            print(f"[INIT] Clone complete.")
         else:
-            print(f"[INIT] ✅ Repository already cloned at {self.local_path}.")
+            print(f"[INIT] Repository already cloned at {self.local_path}.")
         self.repo = Repo(self.local_path)
-        print(f"[INIT] 📂 Repo object ready at {self.local_path}.")
+        print(f"[INIT] Repo object ready at {self.local_path}.")
 
         self.complexity_re = re.compile(r"\b(if|for|while|switch|case)\b")
 
     def get_commits(self) -> List[Dict]:
-        print("[COMMITS] 📬 Fetching commits via GitHub API…")
+        print("[COMMITS] Fetching commits via GitHub API…")
         commits, page, per_page = [], 1, 100
         while True:
-            print(f"[COMMITS]   ▶️  Requesting page {page}")
+            print(f"[COMMITS] Requesting page {page}")
             resp = requests.get(
                 f"{self.api_url}/commits",
                 headers=self.headers,
@@ -64,19 +64,19 @@ class GitHubRepoAnalyzer:
             if resp.status_code == 401:
                 raise RuntimeError("Bad credentials: check your GITHUB_TOKEN")
             if not isinstance(data, list):
-                print(f"[COMMITS] ⚠️  Unexpected response: {data}")
+                print(f"[COMMITS] Unexpected response: {data}")
                 break
             commits.extend(data)
-            print(f"[COMMITS]   ℹ️  Retrieved {len(data)} commits in page {page}.")
+            print(f"[COMMITS] Retrieved {len(data)} commits in page {page}.")
             if len(data) < per_page:
-                print(f"[COMMITS] ⛔ Less than {per_page} commits on page {page}, finishing.")
+                print(f"[COMMITS] Less than {per_page} commits on page {page}, finishing.")
                 break
             page += 1
-        print(f"[COMMITS] ✅ Total commits fetched: {len(commits)}")
+        print(f"[COMMITS] Total commits fetched: {len(commits)}")
         return commits
 
     def get_commit_details(self, sha: str) -> Dict:
-        print(f"[DETAILS] 🔍 Fetching details for commit {sha}…")
+        print(f"[DETAILS] Fetching details for commit {sha}…")
         resp = requests.get(f"{self.api_url}/commits/{sha}", headers=self.headers)
         return resp.json()
 
@@ -98,7 +98,7 @@ class GitHubRepoAnalyzer:
                 else:
                     pyl_w += 1
         except Exception:
-            print(f"[ANALYZE][PY] ⚠️  Pylint failed on {full_path}")
+            print(f"[ANALYZE][PY] Pylint failed on {full_path}")
         try:
             r = subprocess.run(
                 ["bandit", "-f", "json", "-r", full_path],
@@ -107,7 +107,7 @@ class GitHubRepoAnalyzer:
             js = json.loads(r.stdout or "{}")
             bandit = len(js.get("results", []))
         except Exception:
-            print(f"[ANALYZE][PY] ⚠️  Bandit failed on {full_path}")
+            print(f"[ANALYZE][PY] Bandit failed on {full_path}")
         return {"pylint_warnings": pyl_w, "pylint_errors": pyl_e, "bandit_issues": bandit}
 
     def analyze_javascript_file(self, full_path: str) -> Dict[str,int]:
@@ -125,7 +125,7 @@ class GitHubRepoAnalyzer:
                     else:
                         w += 1
         except Exception:
-            print(f"[ANALYZE][JS] ⚠️  ESLint failed on {full_path}")
+            print(f"[ANALYZE][JS] ESLint failed on {full_path}")
         return {"eslint_warnings": w, "eslint_errors": e}
 
     def analyze_java_file(self, full_path: str) -> Dict[str,int]:
@@ -139,7 +139,7 @@ class GitHubRepoAnalyzer:
                 if "ERROR" in ln or "WARNING" in ln:
                     count += 1
         except Exception:
-            print(f"[ANALYZE][JAVA] ⚠️  Checkstyle failed on {full_path}")
+            print(f"[ANALYZE][JAVA] Checkstyle failed on {full_path}")
         return {"checkstyle_issues": count}
 
     def compute_repo_stats(self, commits: List[Dict]) -> Dict:
@@ -155,16 +155,14 @@ class GitHubRepoAnalyzer:
                     'quantile_90': df[f].quantile(0.90),
                     'quantile_95': df[f].quantile(0.95),
                 }
-        # медианы для каждого автора
         stats['author_stats'] = {a: {'median_lines_added': grp.median()}
                                  for a, grp in df.groupby('author_name')['lines_added']}
-        # медиана коммит-интервалов
         if 'minutes_since_previous_commit' in df:
             stats['commit_interval'] = {'median': df['minutes_since_previous_commit'].median()}
         return stats
 
     def analyze_commits(self) -> List[Dict]:
-        print("[ANALYZE] 🚀 Starting commit-by-commit analysis…")
+        print("[ANALYZE] Starting commit-by-commit analysis…")
         commits_data, file_count = [], {}
 
         all_commits = self.get_commits()
@@ -173,14 +171,14 @@ class GitHubRepoAnalyzer:
 
         for idx, c in enumerate(all_commits, 1):
             sha = c["sha"]
-            print(f"[ANALYZE] 🔎 ({idx}/{len(all_commits)}) Processing commit {sha}")
+            print(f"[ANALYZE] ({idx}/{len(all_commits)}) Processing commit {sha}")
             det = self.get_commit_details(sha)
 
             try:
-                print(f"[GIT] ⏪ Checking out {sha}")
+                print(f"[GIT] Checking out {sha}")
                 self.repo.git.checkout(sha)
             except GitCommandError:
-                print(f"[GIT] ⚠️  Cannot checkout {sha}, skipping FS analysis")
+                print(f"[GIT] Cannot checkout {sha}, skipping FS analysis")
 
             msg = det["commit"]["message"]
             author = det["commit"]["author"]
@@ -188,7 +186,7 @@ class GitHubRepoAnalyzer:
             dt = datetime.strptime(author["date"], "%Y-%m-%dT%H:%M:%SZ")
 
             files = det.get("files", [])
-            print(f"[ANALYZE]   📄 {len(files)} files changed")
+            print(f"[ANALYZE]  {len(files)} files changed")
 
             added = sum(f.get("additions", 0) for f in files)
             deleted = sum(f.get("deletions", 0) for f in files)
@@ -244,7 +242,7 @@ class GitHubRepoAnalyzer:
                 file_count[f["filename"]] = file_count.get(f["filename"], 0) + 1
             prev_dt = dt
 
-        print(f"[ANALYZE] ✅ Completed analysis of {len(commits_data)} commits.")
+        print(f"[ANALYZE] Completed analysis of {len(commits_data)} commits.")
         return commits_data
 
     def create_capa_file(self, commits: List[Dict]) -> str:
@@ -260,38 +258,31 @@ class GitHubRepoAnalyzer:
         return path
 
     def push_and_create_pr(self, branch_name: str, file_path: str) -> None:
-        """
-        Create a new branch from origin/main, commit the CAPA file and open a PR.
-        """
-        # 1) Fetch latest from origin
-        print(f"[PR] 🔄 Fetching origin")
+
+        print(f"[PR] Fetching origin")
         self.repo.git.fetch('origin')
 
-        # 2) Create and checkout a new branch from origin/main
-        base_branch = 'main'  # or 'master' if your default branch is named master
-        print(f"[PR] 🔀 Creating branch {branch_name} from origin/{base_branch}")
+        base_branch = 'main'
+        print(f"[PR] Creating branch {branch_name} from origin/{base_branch}")
         self.repo.git.checkout('-b', branch_name, f'origin/{base_branch}')
 
-        # 3) Stage and commit the new file
         rel_path = os.path.relpath(file_path, self.local_path)
-        print(f"[PR] ➕ Adding file {rel_path}")
+        print(f"[PR] Adding file {rel_path}")
         self.repo.index.add([rel_path])
-        print(f"[PR] 💾 Committing changes")
+        print(f"[PR] Committing changes")
         self.repo.index.commit("Add CAPA recommendations")
 
-        # 4) Push the new branch to origin
-        print(f"[PR] 📤 Pushing branch {branch_name}")
+        print(f"[PR] Pushing branch {branch_name}")
         origin = self.repo.remote(name='origin')
         origin.push(branch_name)
 
-        # 5) Create the Pull Request via GitHub API
         pr_data = {
             "title": "Add automated CAPA recommendations",
             "head": f"{self.repo_owner}:{branch_name}",
             "base": base_branch,
             "body": "This PR adds automatically generated corrective/preventive actions."
         }
-        print(f"[PR] 📬 Opening PR via GitHub API")
+        print(f"[PR] Opening PR via GitHub API")
         response = requests.post(
             f"{self.api_url}/pulls",
             headers=self.headers,
@@ -299,9 +290,9 @@ class GitHubRepoAnalyzer:
         )
         if response.status_code in (200, 201):
             pr_url = response.json().get("html_url")
-            print(f"[PR] ✅ Pull request created: {pr_url}")
+            print(f"[PR] Pull request created: {pr_url}")
         else:
-            print(f"[PR] ⚠️ Failed to create PR: {response.status_code} {response.text}")
+            print(f"[PR] ⚠Failed to create PR: {response.status_code} {response.text}")
 
     def analyze_and_pr(self, commits: Optional[List[Dict]] = None) -> None:
         if commits is None:
@@ -311,15 +302,12 @@ class GitHubRepoAnalyzer:
             print("No commits — пропускаем PR.")
             return
 
-        # 1) обучаем модель и предсказываем риск
         model = CommitRiskModel(classifier=XGBClassifier(eval_metric="logloss"))
         model.fit(commits)
         probs = model.predict_proba(commits)
 
-        # 2) считаем статистики репозитория
         repo_stats = self.compute_repo_stats(commits)
 
-        # 3) генерим рекомендации
         for commit, p in zip(commits, probs):
             commit["Risk_Proba"] = float(p)
             commit["has_capa"] = True
@@ -327,7 +315,6 @@ class GitHubRepoAnalyzer:
                 commit, p, repo_stats, model.feature_importances()
             )
 
-        # 4) создаём MD-файл и PR
         md_path = self.create_capa_file(commits)
         branch = f"capa-{datetime.utcnow():%Y%m%d%H%M}"
         self.push_and_create_pr(branch, md_path)
