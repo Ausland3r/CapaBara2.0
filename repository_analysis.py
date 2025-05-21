@@ -258,13 +258,17 @@ class GitHubRepoAnalyzer:
         return path
 
     def push_and_create_pr(self, branch_name: str, file_path: str) -> None:
-
         print(f"[PR] Fetching origin")
         self.repo.git.fetch('origin')
 
         base_branch = 'main'
-        print(f"[PR] Creating branch {branch_name} from origin/{base_branch}")
-        self.repo.git.checkout('-b', branch_name, f'origin/{base_branch}')
+
+        if branch_name in self.repo.branches:
+            print(f"[PR] Branch {branch_name} already exists locally, checking out.")
+            self.repo.git.checkout(branch_name)
+        else:
+            print(f"[PR] Creating branch {branch_name} from origin/{base_branch}")
+            self.repo.git.checkout('-b', branch_name, f'origin/{base_branch}')
 
         rel_path = os.path.relpath(file_path, self.local_path)
         print(f"[PR] Adding file {rel_path}")

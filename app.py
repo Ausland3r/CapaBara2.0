@@ -14,6 +14,7 @@ import numpy as np
 from repository_analysis import GitHubRepoAnalyzer
 from ml_model import CommitRiskModel
 from xgboost import XGBClassifier
+from deepforest import CascadeForestClassifier
 from recommendations import generate_recommendations
 
 # 1. Загрузка настроек
@@ -30,8 +31,10 @@ for full_name in repos:
     analyzer.analyze_and_pr(commits)
 
     # 3. Обучение модели на коммитах
-    model = CommitRiskModel(XGBClassifier(eval_metric="logloss"))
+    #model = CommitRiskModel(XGBClassifier(eval_metric="logloss"))
+    model = CommitRiskModel(CascadeForestClassifier(random_state=42))
     model.fit(commits)
+    metrics = model.evaluate_model(commits)
 
     # 4. Подготовка DataFrame
     df = pd.DataFrame(commits)
@@ -41,7 +44,8 @@ for full_name in repos:
     analyses[full_name] = {
         'df': df,
         'model': model,
-        'feat_imps': model.feature_importances()
+        'feat_imps': model.feature_importances(),
+        'metrics': metrics
     }
 
 # 5. Инициализация Dash-приложения
@@ -70,6 +74,16 @@ def update_tabs(selected_repo):
     entry = analyses[selected_repo]
     df = entry['df'].copy()
     feat_imps = entry['feat_imps']
+    metrics = entry.get('metrics', {})
+    metrics_table = dbc.Table([
+        html.Thead(html.Tr([html.Th("Метрика"), html.Th("Значение")])),
+        html.Tbody([
+            html.Tr([html.Td("Precision"), html.Td(f"{metrics.get('precision', 0):.2f}")]),
+            html.Tr([html.Td("Recall"), html.Td(f"{metrics.get('recall', 0):.2f}")]),
+            html.Tr([html.Td("F1-score"), html.Td(f"{metrics.get('f1_score', 0):.2f}")]),
+            html.Tr([html.Td("ROC-AUC"), html.Td(f"{metrics.get('auc', 0):.2f}")]),
+        ])
+    ], bordered=True, striped=True, hover=True, style={"width": "40%", "marginTop": "20px"})
     features = entry['model'].features
 
     # Подстраховки
@@ -119,6 +133,7 @@ def update_tabs(selected_repo):
     # 7. Анализ риска
     fi_vals = [feat_imps.get(f, 0) for f in features]
     tab_risk = dcc.Tab(label='Анализ риска', children=[
+        metrics_table,
         dbc.Row(dbc.Col(dcc.Graph(
             figure=px.bar(
                 x=features, y=fi_vals,
