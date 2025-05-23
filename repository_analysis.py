@@ -39,7 +39,7 @@ class GitHubRepoAnalyzer:
 
         self.local_path = os.path.join(clone_dir, repo_name)
         if not os.path.isdir(self.local_path):
-            clone_url = f"https://github.com/{repo_owner}/{repo_name}.git"
+            clone_url = f"https://{self.token}@github.com/{repo_owner}/{repo_name}.git"
             print(f"[INIT] Cloning repository {clone_url} into {self.local_path}…")
             Repo.clone_from(clone_url, self.local_path)
             print(f"[INIT] Clone complete.")
@@ -78,6 +78,9 @@ class GitHubRepoAnalyzer:
     def get_commit_details(self, sha: str) -> Dict:
         print(f"[DETAILS] Fetching details for commit {sha}…")
         resp = requests.get(f"{self.api_url}/commits/{sha}", headers=self.headers)
+        if resp.status_code != 200:
+            print(f"[ERROR] Failed to fetch details for {sha}: {resp.status_code} {resp.text}")
+            return {}
         return resp.json()
 
     def detect_language(self, filename: str) -> str:
@@ -180,6 +183,10 @@ class GitHubRepoAnalyzer:
             except GitCommandError:
                 print(f"[GIT] Cannot checkout {sha}, skipping FS analysis")
 
+            if not det or "commit" not in det:
+                print(f"[ERROR] Invalid or missing commit data for {sha}, skipping.")
+                continue
+
             msg = det["commit"]["message"]
             author = det["commit"]["author"]
             name = author.get("name", "Unknown")
@@ -257,11 +264,32 @@ class GitHubRepoAnalyzer:
                     f.write("\n")
         return path
 
-    def push_and_create_pr(self, branch_name: str, file_path: str) -> None:
+    def push_and_create_pr(self, branch_name: str, commits: List[Dict]) -> None:
         print(f"[PR] Fetching origin")
         self.repo.git.fetch('origin')
 
-        base_branch = 'main'
+        base_branches_to_try = ['main', 'master']
+        base_branch = None
+
+        for candidate in base_branches_to_try:
+            try:
+                self.repo.git.rev_parse(f'origin/{candidate}', verify=True)
+                base_branch = candidate
+                print(f"[PR] Found base branch: origin/{base_branch}")
+                break
+            except GitCommandError:
+                print(f"[PR] origin/{candidate} not found, trying next...")
+
+        if base_branch is None:
+            raise RuntimeError("Не удалось найти базовую ветку origin/main или origin/master")
+
+        rel_path = "CapaRecommendations.md"
+        full_path = os.path.join(self.local_path, rel_path)
+
+        # Удаляем старый файл перед переключением ветки
+        if os.path.exists(full_path):
+            print(f"[PR] Removing conflicting file before checkout: {rel_path}")
+            os.remove(full_path)
 
         if branch_name in self.repo.branches:
             print(f"[PR] Branch {branch_name} already exists locally, checking out.")
@@ -270,7 +298,17 @@ class GitHubRepoAnalyzer:
             print(f"[PR] Creating branch {branch_name} from origin/{base_branch}")
             self.repo.git.checkout('-b', branch_name, f'origin/{base_branch}')
 
-        rel_path = os.path.relpath(file_path, self.local_path)
+        # Повторно создаём файл после checkout
+        print(f"[PR] Re-creating {rel_path} after checkout")
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write("# CAPA Recommendations\n\n")
+            for c in commits:
+                if c.get("has_capa"):
+                    f.write(f"## Commit {c['commit']} — risk={c['Risk_Proba']:.2f}\n")
+                    for rec in c["capa_recommendations"]:
+                        f.write(f"- {rec}\n")
+                    f.write("\n")
+
         print(f"[PR] Adding file {rel_path}")
         self.repo.index.add([rel_path])
         print(f"[PR] Committing changes")
@@ -278,7 +316,13 @@ class GitHubRepoAnalyzer:
 
         print(f"[PR] Pushing branch {branch_name}")
         origin = self.repo.remote(name='origin')
-        origin.push(branch_name)
+
+        try:
+            origin.push(branch_name)
+        except GitCommandError as e:
+            print(f"[PR] ⚠ Push failed: {e}")
+            print("[PR] Пропускаем пуш и создание PR из-за ошибки авторизации/доступа.")
+            return
 
         pr_data = {
             "title": "Add automated CAPA recommendations",
@@ -296,7 +340,7 @@ class GitHubRepoAnalyzer:
             pr_url = response.json().get("html_url")
             print(f"[PR] Pull request created: {pr_url}")
         else:
-            print(f"[PR] ⚠Failed to create PR: {response.status_code} {response.text}")
+            print(f"[PR] ⚠ Failed to create PR: {response.status_code} {response.text}")
 
     def analyze_and_pr(self, commits: Optional[List[Dict]] = None) -> None:
         if commits is None:
@@ -319,6 +363,5 @@ class GitHubRepoAnalyzer:
                 commit, p, repo_stats, model.feature_importances()
             )
 
-        md_path = self.create_capa_file(commits)
         branch = f"capa-{datetime.utcnow():%Y%m%d%H%M}"
-        self.push_and_create_pr(branch, md_path)
+        self.push_and_create_pr(branch, commits)

@@ -1,6 +1,8 @@
 # app.py
 
 import os
+from time import time
+
 from dotenv import load_dotenv
 import dash
 from dash import dcc, html, dash_table
@@ -15,38 +17,78 @@ from repository_analysis import GitHubRepoAnalyzer
 from ml_model import CommitRiskModel
 from xgboost import XGBClassifier
 from deepforest import CascadeForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from recommendations import generate_recommendations
 
-# 1. Загрузка настроек
-load_dotenv()
-github_token = os.getenv('GITHUB_TOKEN')
-repos = [r for r in os.getenv("GITHUB_REPOS", "").split(",") if r]
 
-# 2. Сбор и анализ каждого репозитория
-analyses = {}
-for full_name in repos:
-    owner, name = full_name.split("/")
-    analyzer = GitHubRepoAnalyzer(owner, name, github_token)
-    commits = analyzer.analyze_commits()
-    analyzer.analyze_and_pr(commits)
+def load_and_analyze_repos():
+    load_dotenv()
+    github_token = os.getenv('GITHUB_TOKEN')
+    repos = [r for r in os.getenv("GITHUB_REPOS", "").split(",") if r]
+    analyses = {}
+    all_commits = []
 
-    # 3. Обучение модели на коммитах
-    #model = CommitRiskModel(XGBClassifier(eval_metric="logloss"))
-    model = CommitRiskModel(CascadeForestClassifier(random_state=42))
-    model.fit(commits)
-    metrics = model.evaluate_model(commits)
+    for full_name in repos:
+        owner, name = full_name.split("/")
+        analyzer = GitHubRepoAnalyzer(owner, name, github_token)
+        commits = analyzer.analyze_commits()
+        analyzer.analyze_and_pr(commits)
 
-    # 4. Подготовка DataFrame
-    df = pd.DataFrame(commits)
-    df['Risk_Proba'] = model.predict_proba(commits)
-    df['Risk'] = (df['Risk_Proba'] > 0.5).astype(int)
+        all_commits.extend(commits)
 
-    analyses[full_name] = {
-        'df': df,
-        'model': model,
-        'feat_imps': model.feature_importances(),
-        'metrics': metrics
-    }
+        df = pd.DataFrame(commits)
+        df['Risk_Proba'] = 0
+        df['Risk'] = 0
+        analyses[full_name] = {
+            'df': df,
+        }
+
+    return github_token, repos, analyses, all_commits
+
+def compare_models(all_commits):
+    model_variants = [
+        ("RandomForest", RandomForestClassifier(class_weight="balanced", n_estimators=100, random_state=42)),
+        ("XGBoost", XGBClassifier(eval_metric="logloss", use_label_encoder=False, verbosity=0)),
+        ("DeepForest", CascadeForestClassifier(random_state=42))
+    ]
+
+    print("\n====================== СРАВНЕНИЕ МОДЕЛЕЙ ======================")
+    for name, clf in model_variants:
+        print(f"\n>>> {name}")
+        model = CommitRiskModel(classifier=clf)
+        start = time()
+        model.fit(all_commits)
+        fit_time = time() - start
+
+        start = time()
+        _ = model.predict_proba(all_commits)
+        predict_time = time() - start
+
+        metrics = model.evaluate_model(all_commits)
+        print(f"  Precision : {metrics['precision']:.3f}")
+        print(f"  Recall    : {metrics['recall']:.3f}")
+        print(f"  F1-score  : {metrics['f1_score']:.3f}")
+        print(f"  ROC-AUC   : {metrics['auc']:.3f}")
+        print(f"  Fit time  : {fit_time:.2f} сек")
+        print(f"  Predict time: {predict_time:.2f} сек")
+
+def train_and_update_model(all_commits, repos, analyses):
+    model = CommitRiskModel(XGBClassifier(eval_metric="logloss"))
+    model.fit(all_commits)
+
+    for full_name in repos:
+        df = analyses[full_name]['df']
+        df['Risk_Proba'] = model.predict_proba(df.to_dict('records'))
+        df['Risk'] = (df['Risk_Proba'] > 0.5).astype(int)
+
+        analyses[full_name]['model'] = model
+        analyses[full_name]['feat_imps'] = model.feature_importances()
+        analyses[full_name]['metrics'] = model.evaluate_model(df.to_dict('records'))
+
+    return model, analyses
+
+github_token, repos, analyses, all_commits = load_and_analyze_repos()
+model, analyses = train_and_update_model(all_commits, repos, analyses)
 
 # 5. Инициализация Dash-приложения
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
@@ -343,4 +385,12 @@ def update_tabs(selected_repo):
     return dcc.Tabs(tabs)
 
 if __name__ == '__main__':
+    github_token, repos, analyses, all_commits = load_and_analyze_repos()
+    model, analyses = train_and_update_model(all_commits, repos, analyses)
+
+    compare_models(all_commits)
+
+    model, analyses = train_and_update_model(all_commits, repos, analyses)
+
+
     app.run(debug=True)
