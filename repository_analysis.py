@@ -13,7 +13,9 @@ from typing import List, Dict, Optional
 from xgboost import XGBClassifier
 
 from ml_model import CommitRiskModel
-from recommendations import generate_recommendations
+from recommendations import RecommendationGenerator
+
+recommendation_generator = RecommendationGenerator()
 
 # mapping extension → analyzer name
 LANGUAGE_ANALYZERS = {
@@ -111,7 +113,28 @@ class GitHubRepoAnalyzer:
             bandit = len(js.get("results", []))
         except Exception:
             print(f"[ANALYZE][PY] Bandit failed on {full_path}")
-        return {"pylint_warnings": pyl_w, "pylint_errors": pyl_e, "bandit_issues": bandit}
+        cyclomatic_complexity = self.analyze_cyclomatic_complexity(full_path)
+        return {
+            "pylint_warnings": pyl_w,
+            "pylint_errors": pyl_e,
+            "bandit_issues": bandit,
+            "cyclomatic_complexity": cyclomatic_complexity
+        }
+
+    def analyze_cyclomatic_complexity(self, full_path: str) -> int:
+        try:
+            r = subprocess.run(
+                ["radon", "cc", "-s", "-j", full_path],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+            )
+            js = json.loads(r.stdout or "{}")
+            total_complexity = 0
+            for file_results in js.values():
+                total_complexity += sum(func['complexity'] for func in file_results)
+            return total_complexity
+        except Exception:
+            print(f"[ANALYZE][PY] Radon failed on {full_path}")
+            return 0
 
     def analyze_javascript_file(self, full_path: str) -> Dict[str,int]:
         w = e = 0
@@ -149,8 +172,15 @@ class GitHubRepoAnalyzer:
         import pandas as pd
         df = pd.DataFrame(commits)
         stats = {}
-        for f in ['lines_added', 'lines_deleted', 'files_changed',
-                  'avg_file_history', 'message_length', 'complexity_score']:
+        features_for_stats = [
+            'lines_added', 'lines_deleted', 'files_changed',
+            'files_added', 'files_deleted', 'lines_changed',
+            'avg_file_history', 'message_length', 'complexity_score',
+            'cyclomatic_complexity', # new feature
+            'pylint_warnings', 'pylint_errors', 'bandit_issues',
+            'eslint_warnings', 'eslint_errors', 'checkstyle_issues'
+        ]
+        for f in features_for_stats:
             if f in df:
                 stats[f] = {
                     'mean': df[f].mean(),
@@ -210,7 +240,8 @@ class GitHubRepoAnalyzer:
 
             metrics = {k: 0 for k in (
                 "pylint_warnings","pylint_errors","bandit_issues",
-                "eslint_warnings","eslint_errors","checkstyle_issues"
+                "eslint_warnings","eslint_errors","checkstyle_issues",
+                "cyclomatic_complexity"
             )}
             for f in files:
                 lang = self.detect_language(f["filename"])
@@ -228,6 +259,14 @@ class GitHubRepoAnalyzer:
                 for k,v in out.items():
                     metrics[k] += v
 
+            files_added = sum(1 for f in files if f.get("status") == "added")
+            files_deleted = sum(1 for f in files if f.get("status") == "removed")
+            lines_changed = added + deleted
+            todo_fixme_count = 0
+            for f in files:
+                patch = f.get("patch", "")
+                todo_fixme_count += len(re.findall(r'\bTODO\b|\bFIXME\b', patch))
+
             data = {
                 "commit": sha,
                 "author_name": name,
@@ -238,10 +277,14 @@ class GitHubRepoAnalyzer:
                 "lines_added": added,
                 "lines_deleted": deleted,
                 "files_changed": len(files),
+                "files_added": files_added,
+                "files_deleted": files_deleted,
+                "lines_changed": lines_changed,
+                "todo_fixme_count": todo_fixme_count,
                 "avg_file_history": avg_hist,
                 "complexity_score": comp,
+                **metrics,
                 "file_list": [f["filename"] for f in files],
-                **metrics
             }
             commits_data.append(data)
 
@@ -359,7 +402,7 @@ class GitHubRepoAnalyzer:
         for commit, p in zip(commits, probs):
             commit["Risk_Proba"] = float(p)
             commit["has_capa"] = True
-            commit["capa_recommendations"] = generate_recommendations(
+            commit["capa_recommendations"] = recommendation_generator.generate_recommendations(
                 commit, p, repo_stats, model.feature_importances()
             )
 

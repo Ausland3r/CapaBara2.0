@@ -18,7 +18,7 @@ from ml_model import CommitRiskModel
 from xgboost import XGBClassifier
 from deepforest import CascadeForestClassifier
 from sklearn.ensemble import RandomForestClassifier
-from recommendations import generate_recommendations
+from recommendations import RecommendationGenerator
 
 
 def load_and_analyze_repos():
@@ -27,6 +27,7 @@ def load_and_analyze_repos():
     repos = [r for r in os.getenv("GITHUB_REPOS", "").split(",") if r]
     analyses = {}
     all_commits = []
+
 
     for full_name in repos:
         owner, name = full_name.split("/")
@@ -45,11 +46,26 @@ def load_and_analyze_repos():
 
     return github_token, repos, analyses, all_commits
 
+from time import time
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier, AdaBoostClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from deepforest import CascadeForestClassifier
 def compare_models(all_commits):
     model_variants = [
+        ("LogisticRegression", LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)),
         ("RandomForest", RandomForestClassifier(class_weight="balanced", n_estimators=100, random_state=42)),
-        ("XGBoost", XGBClassifier(eval_metric="logloss", use_label_encoder=False, verbosity=0)),
-        ("DeepForest", CascadeForestClassifier(random_state=42))
+        ("ExtraTrees", ExtraTreesClassifier(n_estimators=100, random_state=42)),
+        ("GradientBoosting", GradientBoostingClassifier(n_estimators=100, random_state=42)),
+        ("AdaBoost", AdaBoostClassifier(n_estimators=100, random_state=42)),
+        ("XGBoost", XGBClassifier(eval_metric="logloss", use_label_encoder=False, verbosity=0, random_state=42)),
+        ("LightGBM", LGBMClassifier(random_state=42)),
+        ("CatBoost", CatBoostClassifier(verbose=0, random_seed=42)),
+        ("SVM", SVC(probability=True, random_state=42)),
+        ("DeepForest", CascadeForestClassifier(random_state=42)),
     ]
 
     print("\n====================== СРАВНЕНИЕ МОДЕЛЕЙ ======================")
@@ -323,10 +339,10 @@ def update_tabs(selected_repo):
                 )
             )), className="g-4")
         ]))
-
+    generator = RecommendationGenerator()
     # 12. Commits Table
     df['Recommendations'] = df.apply(
-        lambda row: generate_recommendations(row, row['Risk_Proba'], {}, feat_imps),
+        lambda row: generator.generate_recommendations(row.to_dict(), row['Risk_Proba'], {}, feat_imps),
         axis=1
     )
     df['Recommendations_Text'] = df['Recommendations'].apply(lambda recs: "; ".join(recs))
