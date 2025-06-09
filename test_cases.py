@@ -61,8 +61,8 @@ def trained_model() -> CommitRiskModel:
 @pytest.mark.parametrize(
     ("bad_key", "bad_val", "exc"),
     [
-        ("lines_added", -1, ValueError),        # отрицательное
-        ("files_changed", None, ValueError),    # None в числовом
+        ("lines_added", -1, ValueError),
+        ("files_changed", None, ValueError),
     ],
 )
 def test_invalid_input_raises(trained_model: CommitRiskModel, bad_key, bad_val, exc):

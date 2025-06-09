@@ -1,12 +1,11 @@
-# repository_analysis.py
-
 import os
 import requests
 import re
 import json
 import subprocess
 from datetime import datetime
-import pandas as pd
+
+from deepforest import CascadeForestClassifier
 from git import Repo, GitCommandError
 from typing import List, Dict, Optional
 
@@ -176,7 +175,7 @@ class GitHubRepoAnalyzer:
             'lines_added', 'lines_deleted', 'files_changed',
             'files_added', 'files_deleted', 'lines_changed',
             'avg_file_history', 'message_length', 'complexity_score',
-            'cyclomatic_complexity', # new feature
+            'cyclomatic_complexity',
             'pylint_warnings', 'pylint_errors', 'bandit_issues',
             'eslint_warnings', 'eslint_errors', 'checkstyle_issues'
         ]
@@ -329,7 +328,6 @@ class GitHubRepoAnalyzer:
         rel_path = "CapaRecommendations.md"
         full_path = os.path.join(self.local_path, rel_path)
 
-        # Удаляем старый файл перед переключением ветки
         if os.path.exists(full_path):
             print(f"[PR] Removing conflicting file before checkout: {rel_path}")
             os.remove(full_path)
@@ -341,7 +339,6 @@ class GitHubRepoAnalyzer:
             print(f"[PR] Creating branch {branch_name} from origin/{base_branch}")
             self.repo.git.checkout('-b', branch_name, f'origin/{base_branch}')
 
-        # Повторно создаём файл после checkout
         print(f"[PR] Re-creating {rel_path} after checkout")
         with open(full_path, "w", encoding="utf-8") as f:
             f.write("# CAPA Recommendations\n\n")
@@ -393,7 +390,7 @@ class GitHubRepoAnalyzer:
             print("No commits — пропускаем PR.")
             return
 
-        model = CommitRiskModel(classifier=XGBClassifier(eval_metric="logloss"))
+        model = CommitRiskModel(CascadeForestClassifier(random_state=42))
         model.fit(commits)
         probs = model.predict_proba(commits)
 

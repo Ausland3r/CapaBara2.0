@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections import Counter
 from typing import List, Dict, Any, Optional
+import re
 
 import numpy as np
 from sklearn.base import ClassifierMixin
@@ -47,9 +47,7 @@ class CommitRiskModel:
     ):
         self.classifier = classifier
         self._clf_cls = classifier.__class__
-        self._clf_params = classifier.get_params() if hasattr(
-            classifier, "get_params"
-        ) else {}
+        self._clf_params = classifier.get_params() if hasattr(classifier, "get_params") else {}
 
         base_feats = [
             "lines_added",
@@ -68,9 +66,7 @@ class CommitRiskModel:
         ]
         self.features: List[str] = features or base_feats
 
-        self.cluster_model = cluster_model or KMeans(
-            n_clusters=2, random_state=0, n_init=10
-        )
+        self.cluster_model = cluster_model or KMeans(n_clusters=2, random_state=0, n_init=10)
         self.scaling = scaling
         self.sensitivity = sensitivity
 
@@ -80,34 +76,26 @@ class CommitRiskModel:
         self.scaler = StandardScaler() if scaling else None
 
     def _fill_defaults(self, commits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return [
-            {**self._DEFAULTS, **commit}
-            for commit in commits
-        ]
+        return [{**self._DEFAULTS, **commit} for commit in commits]
 
     def _validate_commits(self, commits: List[Dict[str, Any]]) -> None:
         for i, commit in enumerate(commits):
             missing = [f for f in self.features if f not in commit]
             if missing:
-                raise KeyError(
-                    f"Отсутствует(ют) поле(я) {missing} в коммите {i}"
-                )
+                raise KeyError(f"Отсутствует(ют) поле(я) {missing} в коммите {i}")
 
             for f in self._NUMERIC_FIELDS & commit.keys():
                 v = commit[f]
                 if not isinstance(v, (int, float)):
-                    raise ValueError(
-                        f"Неверный тип поля '{f}' в коммите {i}: {type(v).__name__}"
-                    )
+                    raise ValueError(f"Неверный тип поля '{f}' в коммите {i}: {type(v).__name__}")
                 if v < 0:
-                    raise ValueError(
-                        f"Отрицательное значение поля '{f}' в коммите {i}: {v}"
-                    )
+                    raise ValueError(f"Отрицательное значение поля '{f}' в коммите {i}: {v}")
 
     def _extract_X(self, commits: List[Dict[str, Any]]) -> np.ndarray:
+        if not commits:
+            return np.empty((0, len(self.features)), dtype=float)
         commits = self._fill_defaults(commits)
         self._validate_commits(commits)
-
         X = np.array([[c[f] for f in self.features] for c in commits], dtype=float)
         return self.scaler.fit_transform(X) if self.scaling else X
 
@@ -125,26 +113,69 @@ class CommitRiskModel:
         )
         return is_risky
 
+    def _expert_labels(self, commits: List[Dict[str, Any]]) -> np.ndarray:
+        labels = []
+        ascii_re = re.compile(r'^[\x00-\x7F]+$')
+
+        for commit in commits:
+            risky = 0
+            msg = commit.get("message", "")
+
+            if "merge" in msg.lower():
+                risky = 1
+
+            elif not ascii_re.match(msg):
+                risky = 1
+
+            if commit.get("files_changed", 0) > 5 or \
+               (commit.get("lines_added", 0) + commit.get("lines_deleted", 0)) > 100:
+                risky = 1
+
+            if len(msg.strip()) < 10:
+                risky = 1
+
+            author = commit.get("author_email", "")
+            committer = commit.get("committer_email", "")
+            if author and committer and author != committer:
+                risky = 1
+
+            labels.append(risky)
+
+        return np.array(labels, dtype=int)
+
     def fit(self, commits: List[Dict[str, Any]]) -> "CommitRiskModel":
         X = self._extract_X(commits)
-        y = self._generate_pseudo_labels(X)
+
+        if len(commits) < 40:
+            y = self._expert_labels(commits)
+            print("[INFO] Малый набор данных — используем только экспертные метки")
+        else:
+            cluster_labels = self._generate_pseudo_labels(X)
+            expert_labels = self._expert_labels(commits)
+            y = np.maximum(cluster_labels, expert_labels)
 
         self.classifier.fit(X, y)
-
         self._X, self._y, self._is_fitted = X, y, True
         return self
 
     def predict(self, commits: List[Dict[str, Any]]) -> np.ndarray:
-        assert self._is_fitted, "Модель не обучена"
+        if not self._is_fitted:
+            raise RuntimeError("Модель не обучена")
         X = self._extract_X(commits)
-        return self.classifier.predict(X)
+        cluster_pred = self.classifier.predict(X)
+        expert_labels = self._expert_labels(commits)
+        return np.maximum(cluster_pred, expert_labels)
 
     def predict_proba(self, commits: List[Dict[str, Any]]) -> np.ndarray:
-        assert self._is_fitted, "Модель не обучена"
+        if not self._is_fitted:
+            raise RuntimeError("Модель не обучена")
         X = self._extract_X(commits)
-        proba = self.classifier.predict_proba(X)
-        return proba[:, -1] if proba.ndim == 2 else proba
 
+        if hasattr(self.classifier, "predict_proba"):
+            proba = self.classifier.predict_proba(X)
+            return proba[:, -1] if proba.ndim == 2 else proba
+        else:
+            raise AttributeError("Классификатор не поддерживает predict_proba")
 
     def feature_importances(self) -> Dict[str, float]:
         if not self._is_fitted:
@@ -175,11 +206,15 @@ class CommitRiskModel:
         clf.fit(X_tr, y_tr)
 
         y_pred = clf.predict(X_te)
-        y_prob = (
-            clf.predict_proba(X_te)[:, 1]
-            if hasattr(clf, "predict_proba") and clf.predict_proba(X_te).shape[1] > 1
-            else np.zeros_like(y_pred, dtype=float)
-        )
+
+        if hasattr(clf, "predict_proba"):
+            proba = clf.predict_proba(X_te)
+            y_prob = proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
+        elif hasattr(clf, "decision_function"):
+            decision = clf.decision_function(X_te)
+            y_prob = (decision - decision.min()) / (decision.max() - decision.min() + 1e-8)
+        else:
+            y_prob = np.zeros_like(y_pred, dtype=float)
 
         return {
             "precision": precision_score(y_te, y_pred, zero_division=0),

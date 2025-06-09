@@ -1,8 +1,4 @@
-# app.py
-
 import os
-from time import time
-
 from dotenv import load_dotenv
 import dash
 from dash import dcc, html, dash_table
@@ -106,7 +102,6 @@ def train_and_update_model(all_commits, repos, analyses):
 github_token, repos, analyses, all_commits = load_and_analyze_repos()
 model, analyses = train_and_update_model(all_commits, repos, analyses)
 
-# 5. Инициализация Dash-приложения
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
 
 app.layout = dbc.Container(fluid=True, children=[
@@ -144,7 +139,6 @@ def update_tabs(selected_repo):
     ], bordered=True, striped=True, hover=True, style={"width": "40%", "marginTop": "20px"})
     features = entry['model'].features
 
-    # Подстраховки
     if 'author_name' not in df:
         df['author_name'] = 'Unknown'
     if 'has_bug_keyword' not in df:
@@ -152,21 +146,20 @@ def update_tabs(selected_repo):
             r'\b(fix|bug|error)\b', case=False, regex=True, na=False
         ).astype(int)
 
-    # 6. Общая информация
     tab_summary = dcc.Tab(label='Общая информация', children=[
         dbc.Row([
             dbc.Col(dcc.Graph(
                 figure=px.histogram(
                     df, x='lines_added', nbins=30,
                     title='Добавленные строки',
-                    color_discrete_sequence=['#1f77b4']  # синяя
+                    color_discrete_sequence=['#1f77b4']
                 )
             ), md=6),
             dbc.Col(dcc.Graph(
                 figure=px.histogram(
                     df, x='lines_deleted', nbins=30,
                     title='Удалённые строки',
-                    color_discrete_sequence=['#d62728']  # красная
+                    color_discrete_sequence=['#d62728']
                 )
             ), md=6),
         ], className="g-4"),
@@ -175,20 +168,19 @@ def update_tabs(selected_repo):
                 figure=px.histogram(
                     df, x='files_changed', nbins=30,
                     title='Изменённые файлы',
-                    color_discrete_sequence=['#2ca02c']  # зелёная
+                    color_discrete_sequence=['#2ca02c']
                 )
             ), md=6),
             dbc.Col(dcc.Graph(
                 figure=px.histogram(
                     df, x='complexity_score', nbins=30,
                     title='Сложность изменений',
-                    color_discrete_sequence=['#9467bd']  # фиолетовая
+                    color_discrete_sequence=['#9467bd']
                 )
             ), md=6),
         ], className="g-4"),
     ])
 
-    # 7. Анализ риска
     fi_vals = [feat_imps.get(f, 0) for f in features]
     tab_risk = dcc.Tab(label='Анализ риска', children=[
         metrics_table,
@@ -216,7 +208,6 @@ def update_tabs(selected_repo):
         ], className="g-4"),
     ])
 
-    # 8. Авторы
     author_activity = df['author_name'].value_counts().reset_index()
     author_activity.columns = ['author_name', 'commit_count']
     author_risk = df.groupby('author_name')['Risk_Proba'] \
@@ -242,7 +233,6 @@ def update_tabs(selected_repo):
         ], className="g-4"),
     ])
 
-    # 9. File-Risk Map
     file_df = df.explode('file_list') if 'file_list' in df else pd.DataFrame()
     if not file_df.empty:
         fr = file_df.groupby('file_list').agg(
@@ -257,12 +247,11 @@ def update_tabs(selected_repo):
                 fr, x='change_count', y='avg_risk',
                 hover_name='file_list',
                 title='Частота изменений vs средний риск',
-                color_discrete_sequence=['#17becf']  # бирюзовая
+                color_discrete_sequence=['#17becf']
             )
         )), className="g-4")
     ])
 
-    # 10. Risk Timeline
     df['commit_date'] = pd.to_datetime(df['author_datetime'], errors='coerce').dt.date
     tl = df.sort_values('commit_date').groupby('commit_date').agg(
         daily_risk=('Risk_Proba','mean'),
@@ -289,7 +278,6 @@ def update_tabs(selected_repo):
         dbc.Row(dbc.Col(dcc.Graph(figure=fig_tl)), className="g-4")
     ])
 
-    # 11. Code Quality Tabs
     quality_tabs = []
     if {'pylint_warnings','pylint_errors','bandit_issues'} <= set(df.columns):
         quality_tabs.append(dcc.Tab(label='Python Quality', children=[
@@ -340,7 +328,6 @@ def update_tabs(selected_repo):
             )), className="g-4")
         ]))
     generator = RecommendationGenerator()
-    # 12. Commits Table
     df['Recommendations'] = df.apply(
         lambda row: generator.generate_recommendations(row.to_dict(), row['Risk_Proba'], {}, feat_imps),
         axis=1
@@ -364,7 +351,6 @@ def update_tabs(selected_repo):
         )
     ])
 
-    # 13. Календарь активности
     all_dates = pd.date_range(df['commit_date'].min(), df['commit_date'].max(), freq='D')
     heat = pd.DataFrame({'date': all_dates})
     heat['count'] = heat['date'].map(df['commit_date'].value_counts()).fillna(0)
@@ -387,7 +373,6 @@ def update_tabs(selected_repo):
         dbc.Row(dbc.Col(dcc.Graph(figure=cal_fig)), className="g-4")
     ])
 
-    # Собираем все вкладки
     tabs = [
         tab_summary,
         tab_risk,
