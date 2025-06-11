@@ -16,6 +16,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+
 class CommitRiskModel:
     _NUMERIC_FIELDS = {
         "lines_added",
@@ -37,13 +38,15 @@ class CommitRiskModel:
     _DEFAULTS: Dict[str, Any] = {f: 0 for f in _OPTIONAL_FIELDS}
 
     def __init__(
-        self,
-        classifier: ClassifierMixin,
-        features: Optional[List[str]] = None,
-        cluster_model: Optional[KMeans] = None,
-        *,
-        scaling: bool = True,
-        sensitivity: float = 1.0,
+            self,
+            classifier: ClassifierMixin,
+            features: Optional[List[str]] = None,
+            cluster_model: Optional[KMeans] = None,
+            *,
+            scaling: bool = True,
+            sensitivity: float = 1.0,
+            files_factor: float = 1,
+            lines_factor: float = 1,
     ):
         self.classifier = classifier
         self._clf_cls = classifier.__class__
@@ -69,11 +72,15 @@ class CommitRiskModel:
         self.cluster_model = cluster_model or KMeans(n_clusters=2, random_state=0, n_init=10)
         self.scaling = scaling
         self.sensitivity = sensitivity
+        self.files_factor = files_factor
+        self.lines_factor = lines_factor
 
         self._is_fitted = False
         self._X: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
         self.scaler = StandardScaler() if scaling else None
+        self.project_avg_files = None
+        self.project_avg_lines = None
 
     def _fill_defaults(self, commits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [{**self._DEFAULTS, **commit} for commit in commits]
@@ -123,27 +130,40 @@ class CommitRiskModel:
 
             if "merge" in msg.lower():
                 risky = 1
-
             elif not ascii_re.match(msg):
                 risky = 1
-
-            if commit.get("files_changed", 0) > 5 or \
-               (commit.get("lines_added", 0) + commit.get("lines_deleted", 0)) > 100:
+            elif len(msg.strip()) < 10:
+                risky = 1
+            elif commit.get("author_email", "") != commit.get("committer_email", ""):
                 risky = 1
 
-            if len(msg.strip()) < 10:
-                risky = 1
+            files = commit.get("files_changed", 0)
+            lines = commit.get("lines_added", 0) + commit.get("lines_deleted", 0)
 
-            author = commit.get("author_email", "")
-            committer = commit.get("committer_email", "")
-            if author and committer and author != committer:
-                risky = 1
+            if self.project_avg_files is not None and self.project_avg_lines is not None:
+                if files > self.project_avg_files * self.files_factor:
+                    risky = 1
+                elif lines > self.project_avg_lines * self.lines_factor:
+                    risky = 1
+            else:
+                if files > 5 or lines > 100:
+                    risky = 1
 
             labels.append(risky)
 
         return np.array(labels, dtype=int)
 
     def fit(self, commits: List[Dict[str, Any]]) -> "CommitRiskModel":
+        if commits:
+            files_changed = [c.get('files_changed', 0) for c in commits]
+            total_lines = [c.get('lines_added', 0) + c.get('lines_deleted', 0) for c in commits]
+
+            self.project_avg_files = np.mean(files_changed) if files_changed else 0
+            self.project_avg_lines = np.mean(total_lines) if total_lines else 0
+
+            print(
+                f"[INFO] Средние значения по проекту: файлы={self.project_avg_files:.1f}, строки={self.project_avg_lines:.1f}")
+
         X = self._extract_X(commits)
 
         if len(commits) < 40:
