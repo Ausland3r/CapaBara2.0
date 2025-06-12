@@ -1,33 +1,12 @@
-﻿# Дипломная работа: Разработка системы формирования корректирующих и предупредительных действий на основе изменений репозитория кода
+This is a CAPA Generation tool designed to automatically generate warnings for changes made in a pull request. 
 
-## Описание проекта
-Данная дипломная работа посвящена разработке системы автоматического анализа истории коммитов в репозиториях GitHub с целью выявления потенциально рискованных изменений кода и формирования рекомендаций по корректирующим и предупреждающим действиям (CAPA).
+The project is completed during the preparation of Alexander E. Ilchuck's bachelor thesis at SPbPU Institute of Computer Science and Cybersecurity (SPbPU ICSC).
 
-Система включает в себя:
 
-- Сбор и предобработку данных из GitHub API и локального клона репозитория;
-- Вычисление метрик коммитов, включая количество изменений, сложность и статический анализ;
-- Обучение модели машинного обучения для классификации риска коммитов;
-- Генерацию рекомендаций для улучшения качества разработки;
-- Визуализацию результатов и аналитики через веб-панель на основе Dash.
+Authors and Contributors
+Advisor and minor contributor: Vladimir A. Parkhomenko Senior Lecturer at SPbPU ICSC
 
-## Технологии
-- Python 3.9+
-- GitPython
-- Requests
-- scikit-learn, deep-forest
-- Dash (Plotly)
-- Статический анализ: pylint, bandit, eslint, checkstyle
+Main Contributor: Alexander E. Ilchuck Student at SPbPU ICSC
 
-## Структура проекта
-- `repository_analysis.py` — модуль сбора и анализа данных из репозиториев
-- `ml_model.py` — реализация модели классификации риска коммитов
-- `recommendations.py` — генерация рекомендаций CAPA
-- `dashboard.py` — веб-интерфейс для визуализации аналитики
-
-## Инструкция по запуску
-1. Установить зависимости из `requirements.txt`
-2. Получить GitHub token для доступа к API
-3. Запустить скрипт сбора данных и анализа коммитов
-4. Обучить модель классификации
-5. Запустить веб-сервер Dash для просмотра результатов
+Reference (to be updated after publication):
+Please, using this repository, cite the following paper https://hsse.spbstu.ru/userfiles/files/1941_sovremennie_tehnologii_s_oblozhkoy.pdf, 2025
